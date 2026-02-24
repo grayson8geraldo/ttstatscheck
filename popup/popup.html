@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>TT Stats → Google Sheets</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <div class="container">
+    <h1>TikTok Stats Export</h1>
+
+    <!-- Status bar -->
+    <div id="status-bar" class="status-bar hidden">
+      <span id="status-text"></span>
+    </div>
+
+    <!-- Settings Section -->
+    <div class="section" id="settings-section">
+      <h2>Настройки</h2>
+
+      <div class="field">
+        <label for="spreadsheet-id">ID Google Таблицы</label>
+        <input type="text" id="spreadsheet-id" placeholder="1BxiMVs0XRA5nFMdKvBdBZjgmUUqptlbs74OgVE2upms">
+        <small>Из URL таблицы: docs.google.com/spreadsheets/d/<b>ВОТ_ЭТОТ_ID</b>/edit</small>
+      </div>
+
+      <div class="field">
+        <label for="sheet-name">Название листа</label>
+        <input type="text" id="sheet-name" placeholder="Лист1" value="Лист1">
+      </div>
+
+      <div class="field">
+        <label for="start-row">Начальная строка для записи</label>
+        <input type="number" id="start-row" placeholder="2" value="2" min="1">
+        <small>Строка, с которой начнётся запись (1 = заголовки)</small>
+      </div>
+
+      <div class="field">
+        <label>Столбцы для данных</label>
+        <div class="columns-grid">
+          <div class="col-item">
+            <label for="col-account">Кабинет</label>
+            <input type="text" id="col-account" value="A" maxlength="2">
+          </div>
+          <div class="col-item">
+            <label for="col-campaign">Кампания</label>
+            <input type="text" id="col-campaign" value="B" maxlength="2">
+          </div>
+          <div class="col-item">
+            <label for="col-spend">Расход</label>
+            <input type="text" id="col-spend" value="C" maxlength="2">
+          </div>
+          <div class="col-item">
+            <label for="col-cpc">CPC</label>
+            <input type="text" id="col-cpc" value="D" maxlength="2">
+          </div>
+          <div class="col-item">
+            <label for="col-cpl">CPL</label>
+            <input type="text" id="col-cpl" value="E" maxlength="2">
+          </div>
+          <div class="col-item">
+            <label for="col-date">Дата</label>
+            <input type="text" id="col-date" value="F" maxlength="2">
+          </div>
+        </div>
+      </div>
+
+      <button id="save-settings" class="btn btn-secondary">Сохранить настройки</button>
+      <button id="auth-google" class="btn btn-primary">Авторизоваться в Google</button>
+    </div>
+
+    <!-- Export Section -->
+    <div class="section" id="export-section">
+      <h2>Экспорт данных</h2>
+
+      <div id="auth-status" class="auth-status not-auth">
+        <span class="dot"></span>
+        <span id="auth-status-text">Не авторизован</span>
+      </div>
+
+      <div class="field">
+        <label>Режим записи</label>
+        <div class="radio-group">
+          <label class="radio-label">
+            <input type="radio" name="write-mode" value="append" checked>
+            Добавить в конец
+          </label>
+          <label class="radio-label">
+            <input type="radio" name="write-mode" value="overwrite">
+            Перезаписать (с начальной строки)
+          </label>
+        </div>
+      </div>
+
+      <button id="extract-btn" class="btn btn-primary btn-large">
+        Собрать и отправить в Sheets
+      </button>
+
+      <div id="preview-section" class="hidden">
+        <h3>Предпросмотр данных</h3>
+        <div id="preview-table-container">
+          <table id="preview-table">
+            <thead>
+              <tr>
+                <th>Кабинет</th>
+                <th>Кампания</th>
+                <th>Расход</th>
+                <th>CPC</th>
+                <th>CPL</th>
+                <th>Дата</th>
+              </tr>
+            </thead>
+            <tbody id="preview-body"></tbody>
+          </table>
+        </div>
+        <div class="preview-actions">
+          <span id="row-count"></span>
+          <button id="confirm-send" class="btn btn-primary">Отправить в Google Sheets</button>
+          <button id="cancel-send" class="btn btn-secondary">Отмена</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Log Section -->
+    <div class="section" id="log-section">
+      <h2>Журнал</h2>
+      <div id="log-container"></div>
+    </div>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>
