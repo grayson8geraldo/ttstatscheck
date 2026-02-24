@@ -23,6 +23,12 @@ document.addEventListener('DOMContentLoaded', () => {
     lastUpdated: document.getElementById('last-updated'),
     autoRefresh: document.getElementById('auto-refresh'),
     clearDataBtn: document.getElementById('clear-data-btn'),
+    manualAccount: document.getElementById('manual-account'),
+    manualCampaign: document.getElementById('manual-campaign'),
+    manualSpend: document.getElementById('manual-spend'),
+    manualCpc: document.getElementById('manual-cpc'),
+    manualCpl: document.getElementById('manual-cpl'),
+    manualAddBtn: document.getElementById('manual-add-btn'),
   };
 
   let allData = [];
@@ -41,6 +47,7 @@ document.addEventListener('DOMContentLoaded', () => {
   el.accountFilter.addEventListener('change', renderCampaigns);
   el.autoRefresh.addEventListener('change', setupAutoRefresh);
   el.clearDataBtn.addEventListener('click', clearData);
+  el.manualAddBtn.addEventListener('click', manualAdd);
 
   document.querySelectorAll('.sortable').forEach(th => {
     th.addEventListener('click', () => {
@@ -91,6 +98,63 @@ document.addEventListener('DOMContentLoaded', () => {
     const interval = parseInt(el.autoRefresh.value);
     if (interval > 0) {
       refreshTimer = setInterval(fetchData, interval * 1000);
+    }
+  }
+
+  // --- Manual add data ---
+  async function manualAdd() {
+    const accountName = el.manualAccount.value.trim();
+    const campaign = el.manualCampaign.value.trim();
+    if (!accountName) {
+      showStatus('Введите название аккаунта', 'error');
+      return;
+    }
+    if (!campaign) {
+      showStatus('Введите название кампании', 'error');
+      return;
+    }
+
+    try {
+      const resp = await fetch(`${API_BASE}/api/stats`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          accountName,
+          campaigns: [{
+            campaign,
+            spend: el.manualSpend.value.trim() || '',
+            cpc: el.manualCpc.value.trim() || '',
+            cpl: el.manualCpl.value.trim() || '',
+          }],
+        }),
+      });
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+
+      // Clear inputs
+      el.manualCampaign.value = '';
+      el.manualSpend.value = '';
+      el.manualCpc.value = '';
+      el.manualCpl.value = '';
+
+      showStatus(`Добавлена кампания "${campaign}" для аккаунта "${accountName}"`, 'success');
+      fetchData();
+    } catch (err) {
+      showStatus('Ошибка: ' + err.message, 'error');
+    }
+  }
+
+  // --- Delete account ---
+  async function deleteAccount(accountName) {
+    if (!confirm(`Удалить все данные аккаунта "${accountName}"?`)) return;
+    try {
+      const resp = await fetch(`${API_BASE}/api/stats/${encodeURIComponent(accountName)}`, {
+        method: 'DELETE',
+      });
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+      showStatus(`Аккаунт "${accountName}" удалён`, 'success');
+      fetchData();
+    } catch (err) {
+      showStatus('Ошибка: ' + err.message, 'error');
     }
   }
 
@@ -248,7 +312,9 @@ document.addEventListener('DOMContentLoaded', () => {
         <td>${campaignSet.size}</td>
         <td>${rows.length}</td>
         <td>${latestTime ? new Date(latestTime).toLocaleString('ru-RU') : '\u2014'}</td>
+        <td><button class="btn-remove" data-account="${escapeHtml(accName)}">Удалить</button></td>
       `;
+      tr.querySelector('.btn-remove').addEventListener('click', () => deleteAccount(accName));
       el.accountsBody.appendChild(tr);
     });
   }

@@ -270,6 +270,43 @@ tr:hover td {
   color: #555;
 }
 
+/* Account management */
+.hint {
+  font-size: 13px;
+  color: #777;
+  margin-bottom: 14px;
+  line-height: 1.5;
+}
+
+.add-account-form .form-row {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 8px;
+  flex-wrap: wrap;
+}
+
+.add-account-form .form-row input {
+  flex: 1;
+  min-width: 140px;
+}
+
+.btn-remove {
+  background: none;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  color: #999;
+  cursor: pointer;
+  padding: 4px 10px;
+  font-size: 12px;
+  transition: all 0.2s;
+}
+
+.btn-remove:hover {
+  background: #f8d7da;
+  color: #dc3545;
+  border-color: #dc3545;
+}
+
 /* Footer */
 .footer {
   text-align: center;

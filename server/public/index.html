@@ -73,13 +73,33 @@
             <th>Кампаний</th>
             <th>Записей</th>
             <th>Последнее обновление</th>
+            <th></th>
           </tr>
         </thead>
         <tbody id="accounts-body"></tbody>
       </table>
     </div>
     <div id="no-accounts" class="empty-state hidden">
-      Нет данных. Расширение в профилях антидетект-браузера автоматически отправит данные сюда.
+      Нет данных. Расширение в профилях антидетект-браузера автоматически отправит данные сюда.<br>
+      Или добавьте тестовые данные вручную ниже.
+    </div>
+  </div>
+
+  <!-- Manual account add (for testing) -->
+  <div class="section">
+    <h2>Добавить данные вручную</h2>
+    <p class="hint">Для проверки работы дашборда. В рабочем режиме данные приходят автоматически от расширений.</p>
+    <div class="add-account-form">
+      <div class="form-row">
+        <input type="text" id="manual-account" placeholder="Название аккаунта (напр. TT24)">
+        <input type="text" id="manual-campaign" placeholder="Название кампании">
+      </div>
+      <div class="form-row">
+        <input type="text" id="manual-spend" placeholder="Расход (напр. 150.50)">
+        <input type="text" id="manual-cpc" placeholder="CPC (напр. 0.35)">
+        <input type="text" id="manual-cpl" placeholder="CPL (напр. 5.20)">
+      </div>
+      <button id="manual-add-btn" class="btn btn-primary">Добавить</button>
     </div>
   </div>
 
