@@ -6,7 +6,7 @@
  * - Google OAuth2 authentication and Google Sheets API (optional)
  */
 
-const SERVER_URL = 'http://localhost:3000';
+const SERVER_URL = 'http://localhost:3220';
 const ALARM_NAME = 'auto-collect-stats';
 
 // Store access token in memory
