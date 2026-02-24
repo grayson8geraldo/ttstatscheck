@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>TikTok Ads Dashboard</title>
+  <link rel="stylesheet" href="dashboard.css">
+</head>
+<body>
+  <header>
+    <h1>TikTok Ads Dashboard</h1>
+    <div class="header-actions">
+      <select id="date-filter">
+        <option value="today">Сегодня</option>
+        <option value="yesterday">Вчера</option>
+        <option value="7days">Последние 7 дней</option>
+        <option value="30days">Последние 30 дней</option>
+        <option value="all" selected>Все данные</option>
+      </select>
+      <button id="collect-btn" class="btn btn-primary">Собрать со всех аккаунтов</button>
+    </div>
+  </header>
+
+  <div id="status-bar" class="status-bar hidden">
+    <span id="status-text"></span>
+  </div>
+
+  <!-- Progress bar for collection -->
+  <div id="progress-section" class="progress-section hidden">
+    <div class="progress-text" id="progress-text">Сбор данных...</div>
+    <div class="progress-bar-container">
+      <div class="progress-bar" id="progress-bar"></div>
+    </div>
+  </div>
+
+  <!-- Summary Cards -->
+  <div class="cards-grid" id="summary-cards">
+    <div class="card">
+      <div class="card-label">Аккаунтов</div>
+      <div class="card-value" id="total-accounts">&mdash;</div>
+    </div>
+    <div class="card">
+      <div class="card-label">Общий расход</div>
+      <div class="card-value" id="total-spend">&mdash;</div>
+    </div>
+    <div class="card">
+      <div class="card-label">Средний CPC</div>
+      <div class="card-value" id="avg-cpc">&mdash;</div>
+    </div>
+    <div class="card">
+      <div class="card-label">Средний CPL</div>
+      <div class="card-value" id="avg-cpl">&mdash;</div>
+    </div>
+    <div class="card">
+      <div class="card-label">Кампаний</div>
+      <div class="card-value" id="total-campaigns">&mdash;</div>
+    </div>
+    <div class="card">
+      <div class="card-label">Записей</div>
+      <div class="card-value" id="total-rows">&mdash;</div>
+    </div>
+  </div>
+
+  <!-- Per-Account Stats -->
+  <div class="section">
+    <h2>Статистика по аккаунтам</h2>
+    <div class="table-container">
+      <table id="accounts-table">
+        <thead>
+          <tr>
+            <th>Аккаунт</th>
+            <th>Расход</th>
+            <th>Ср. CPC</th>
+            <th>Ср. CPL</th>
+            <th>Кампаний</th>
+            <th>Записей</th>
+          </tr>
+        </thead>
+        <tbody id="accounts-body"></tbody>
+      </table>
+    </div>
+    <div id="no-accounts" class="empty-state hidden">
+      Нет данных. Добавьте аккаунты и нажмите "Собрать со всех аккаунтов".
+    </div>
+  </div>
+
+  <!-- All Campaigns Table -->
+  <div class="section">
+    <h2>Все кампании</h2>
+    <div class="table-controls">
+      <input type="text" id="search-input" placeholder="Поиск по аккаунту или кампании...">
+      <select id="account-filter">
+        <option value="all">Все аккаунты</option>
+      </select>
+    </div>
+    <div class="table-container">
+      <table id="campaigns-table">
+        <thead>
+          <tr>
+            <th class="sortable" data-sort="account">Аккаунт</th>
+            <th class="sortable" data-sort="campaign">Кампания</th>
+            <th class="sortable" data-sort="spend">Расход</th>
+            <th class="sortable" data-sort="cpc">CPC</th>
+            <th class="sortable" data-sort="cpl">CPL</th>
+            <th class="sortable" data-sort="date">Дата</th>
+          </tr>
+        </thead>
+        <tbody id="campaigns-body"></tbody>
+      </table>
+    </div>
+    <div id="no-campaigns" class="empty-state hidden">Нет данных для отображения.</div>
+  </div>
+
+  <!-- Account Management -->
+  <div class="section">
+    <h2>Управление аккаунтами</h2>
+    <p class="hint">Добавьте ссылки на ваши рекламные кабинеты TikTok Ads Manager. Расширение будет автоматически заходить на каждый и собирать статистику.</p>
+    <div class="add-account-row">
+      <input type="text" id="new-account-url" placeholder="https://ads.tiktok.com/i18n/perf/campaign?aadvid=...">
+      <input type="text" id="new-account-name" placeholder="Название (напр. Аккаунт 1)">
+      <button id="add-account-btn" class="btn btn-primary">Добавить</button>
+    </div>
+    <div id="accounts-list"></div>
+  </div>
+
+  <div class="footer">
+    <span id="last-updated">Последнее обновление: —</span>
+  </div>
+
+  <script src="dashboard.js"></script>
+</body>
+</html>

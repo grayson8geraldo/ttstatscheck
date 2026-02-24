@@ -16,6 +16,11 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     handleSendToSheets(request.data, request.settings, request.writeMode, sendResponse);
     return true;
   }
+
+  if (request.action === 'collect_from_account') {
+    handleCollectFromAccount(request.account, sendResponse);
+    return true;
+  }
 });
 
 /**
@@ -164,6 +169,87 @@ async function appendToSheet(spreadsheetId, sheetName, firstCol, lastCol, rows) 
   }
 
   return await response.json();
+}
+
+/**
+ * Collect stats from a single TikTok account by opening a background tab,
+ * waiting for the page to load, injecting the content script, and extracting data.
+ */
+async function handleCollectFromAccount(account, sendResponse) {
+  let tabId = null;
+  try {
+    // Create a tab in the background
+    const tab = await chrome.tabs.create({ url: account.url, active: false });
+    tabId = tab.id;
+
+    // Wait for the tab to finish loading
+    await waitForTabLoad(tabId);
+
+    // Give the page extra time for dynamic content to render
+    await sleep(4000);
+
+    // Inject the content script into the tab
+    await chrome.scripting.executeScript({
+      target: { tabId: tabId },
+      files: ['content/content.js'],
+    });
+
+    // Small delay for content script to initialize
+    await sleep(500);
+
+    // Send extract message to the content script
+    const response = await chrome.tabs.sendMessage(tabId, { action: 'extract_stats' });
+
+    // Close the background tab
+    await chrome.tabs.remove(tabId);
+    tabId = null;
+
+    if (response && response.success && response.data) {
+      // Override account name with the configured name
+      const data = response.data.map(row => ({
+        ...row,
+        account: row.account || account.name,
+      }));
+      sendResponse({ success: true, data });
+    } else {
+      sendResponse({
+        success: false,
+        error: response?.error || 'Не удалось собрать данные с аккаунта',
+      });
+    }
+  } catch (err) {
+    // Clean up tab if it was opened
+    if (tabId) {
+      try { await chrome.tabs.remove(tabId); } catch (_) { /* ignore */ }
+    }
+    sendResponse({ success: false, error: err.message });
+  }
+}
+
+/**
+ * Wait for a tab to finish loading
+ */
+function waitForTabLoad(tabId) {
+  return new Promise((resolve, reject) => {
+    const timeout = setTimeout(() => {
+      chrome.tabs.onUpdated.removeListener(listener);
+      reject(new Error('Таймаут загрузки страницы (30 сек)'));
+    }, 30000);
+
+    function listener(updatedTabId, changeInfo) {
+      if (updatedTabId === tabId && changeInfo.status === 'complete') {
+        clearTimeout(timeout);
+        chrome.tabs.onUpdated.removeListener(listener);
+        resolve();
+      }
+    }
+
+    chrome.tabs.onUpdated.addListener(listener);
+  });
+}
+
+function sleep(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
 }
 
 /**

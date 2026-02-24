@@ -26,6 +26,11 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   let extractedData = [];
 
+  // Open dashboard
+  document.getElementById('open-dashboard').addEventListener('click', () => {
+    chrome.tabs.create({ url: chrome.runtime.getURL('dashboard/dashboard.html') });
+  });
+
   // Load saved settings
   const settings = await chrome.storage.local.get([
     'spreadsheetId', 'sheetName', 'startRow',
