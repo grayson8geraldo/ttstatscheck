@@ -1,15 +1,22 @@
 /**
  * Background service worker for TikTok Stats Chrome Extension
- * Handles Google OAuth2 authentication and Google Sheets API calls
+ * Handles:
+ * - Auto-collection of stats from TikTok Ads Manager
+ * - Sending data to local aggregation server (localhost:3000)
+ * - Google OAuth2 authentication and Google Sheets API (optional)
  */
+
+const SERVER_URL = 'http://localhost:3000';
+const ALARM_NAME = 'auto-collect-stats';
 
 // Store access token in memory
 let accessToken = null;
 
+// --- Message Listener ---
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   if (request.action === 'auth_google') {
     handleGoogleAuth(sendResponse);
-    return true; // Keep channel open for async
+    return true;
   }
 
   if (request.action === 'send_to_sheets') {
@@ -21,22 +28,192 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     handleCollectFromAccount(request.account, sendResponse);
     return true;
   }
+
+  // Content script reports auto-collected data
+  if (request.action === 'auto_report_stats') {
+    handleAutoReport(request.data, request.accountName);
+    sendResponse({ success: true });
+    return true;
+  }
+
+  // Manual trigger from popup
+  if (request.action === 'trigger_collect') {
+    triggerAutoCollect();
+    sendResponse({ success: true });
+    return true;
+  }
+
+  // Get server status
+  if (request.action === 'get_server_status') {
+    checkServerHealth().then(status => sendResponse(status));
+    return true;
+  }
 });
 
+// --- Auto-collection setup ---
+
+// Set up alarm on extension install/update
+chrome.runtime.onInstalled.addListener(() => {
+  setupAlarm();
+  // Try initial collection after a short delay
+  setTimeout(triggerAutoCollect, 10000);
+});
+
+// Set up alarm on service worker startup
+chrome.runtime.onStartup.addListener(() => {
+  setupAlarm();
+  // Collect on browser startup
+  setTimeout(triggerAutoCollect, 15000);
+});
+
+// Handle alarm
+chrome.alarms.onAlarm.addListener((alarm) => {
+  if (alarm.name === ALARM_NAME) {
+    triggerAutoCollect();
+  }
+});
+
+function setupAlarm() {
+  chrome.storage.local.get(['collectInterval'], (result) => {
+    const minutes = result.collectInterval || 60; // Default: every 60 min
+    chrome.alarms.create(ALARM_NAME, {
+      delayInMinutes: 1,
+      periodInMinutes: minutes,
+    });
+    console.log(`[TikTok Stats] Автосбор настроен: каждые ${minutes} мин`);
+  });
+}
+
 /**
- * Authenticate with Google using Chrome Identity API
+ * Trigger auto-collection: open TikTok Ads in a background tab,
+ * extract data, send to local server
  */
+async function triggerAutoCollect() {
+  console.log('[TikTok Stats] Запуск автоматического сбора...');
+
+  // Get the TikTok Ads URL to collect from
+  // In each anti-detect profile, we auto-detect the account
+  const url = 'https://ads.tiktok.com/i18n/perf/campaign';
+
+  let tabId = null;
+  try {
+    // Check if server is available first
+    const health = await checkServerHealth();
+    if (!health.ok) {
+      console.log('[TikTok Stats] Сервер недоступен, пропускаем сбор');
+      return;
+    }
+
+    // Create background tab
+    const tab = await chrome.tabs.create({ url, active: false });
+    tabId = tab.id;
+
+    // Wait for page to load
+    await waitForTabLoad(tabId);
+
+    // Extra time for TikTok's dynamic content
+    await sleep(5000);
+
+    // Inject content script
+    await chrome.scripting.executeScript({
+      target: { tabId },
+      files: ['content/content.js'],
+    });
+
+    await sleep(1000);
+
+    // Extract data
+    const response = await chrome.tabs.sendMessage(tabId, { action: 'extract_stats' });
+
+    // Close tab
+    await chrome.tabs.remove(tabId);
+    tabId = null;
+
+    if (response && response.success && response.data && response.data.length > 0) {
+      // Send to local server
+      await sendToServer(response.data);
+      console.log(`[TikTok Stats] Отправлено ${response.data.length} записей на сервер`);
+    } else {
+      console.log('[TikTok Stats] Нет данных для отправки');
+    }
+  } catch (err) {
+    console.error('[TikTok Stats] Ошибка автосбора:', err.message);
+    if (tabId) {
+      try { await chrome.tabs.remove(tabId); } catch (_) { /* ignore */ }
+    }
+  }
+}
+
+/**
+ * Handle auto-reported data from content script
+ */
+async function handleAutoReport(data, accountName) {
+  if (!data || data.length === 0) return;
+
+  try {
+    await sendToServer(data);
+    console.log(`[TikTok Stats] Авто-отчёт: ${data.length} записей от "${accountName || 'unknown'}"`);
+  } catch (err) {
+    console.error('[TikTok Stats] Ошибка отправки авто-отчёта:', err.message);
+  }
+}
+
+/**
+ * Send data to local aggregation server
+ */
+async function sendToServer(data) {
+  if (!data || data.length === 0) return;
+
+  // Group by account name
+  const grouped = {};
+  data.forEach(row => {
+    const acc = row.account || 'Unknown Account';
+    if (!grouped[acc]) grouped[acc] = [];
+    grouped[acc].push(row);
+  });
+
+  // Send each account's data separately
+  for (const [accountName, campaigns] of Object.entries(grouped)) {
+    const response = await fetch(`${SERVER_URL}/api/stats`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        accountName,
+        campaigns,
+        date: campaigns[0]?.date || new Date().toLocaleDateString('ru-RU'),
+      }),
+    });
+
+    if (!response.ok) {
+      throw new Error(`Server error: ${response.status}`);
+    }
+  }
+}
+
+/**
+ * Check if local server is running
+ */
+async function checkServerHealth() {
+  try {
+    const resp = await fetch(`${SERVER_URL}/api/health`, { signal: AbortSignal.timeout(3000) });
+    if (resp.ok) {
+      return { ok: true };
+    }
+    return { ok: false, error: `HTTP ${resp.status}` };
+  } catch {
+    return { ok: false, error: 'Server unreachable' };
+  }
+}
+
+// --- Existing functionality (Google Auth + Sheets) ---
+
 async function handleGoogleAuth(sendResponse) {
   try {
     chrome.identity.getAuthToken({ interactive: true }, (token) => {
       if (chrome.runtime.lastError) {
-        sendResponse({
-          success: false,
-          error: chrome.runtime.lastError.message
-        });
+        sendResponse({ success: false, error: chrome.runtime.lastError.message });
         return;
       }
-
       if (token) {
         accessToken = token;
         sendResponse({ success: true });
@@ -49,14 +226,9 @@ async function handleGoogleAuth(sendResponse) {
   }
 }
 
-/**
- * Send extracted data to Google Sheets
- */
 async function handleSendToSheets(data, settings, writeMode, sendResponse) {
   try {
-    // Ensure we have a token
     if (!accessToken) {
-      // Try to get token silently
       accessToken = await new Promise((resolve, reject) => {
         chrome.identity.getAuthToken({ interactive: false }, (token) => {
           if (chrome.runtime.lastError || !token) {
@@ -70,7 +242,6 @@ async function handleSendToSheets(data, settings, writeMode, sendResponse) {
 
     const { spreadsheetId, sheetName, startRow, colAccount, colCampaign, colSpend, colCpc, colCpl, colDate } = settings;
 
-    // Build the values array according to column mapping
     const columnMap = {
       [colAccount]: 'account',
       [colCampaign]: 'campaign',
@@ -80,12 +251,10 @@ async function handleSendToSheets(data, settings, writeMode, sendResponse) {
       [colDate]: 'date',
     };
 
-    // Sort columns alphabetically to determine range
     const sortedCols = Object.keys(columnMap).sort();
     const firstCol = sortedCols[0];
     const lastCol = sortedCols[sortedCols.length - 1];
 
-    // Convert column letters to indices (A=0, B=1, ...)
     const colToIndex = (col) => {
       let idx = 0;
       for (let i = 0; i < col.length; i++) {
@@ -98,7 +267,6 @@ async function handleSendToSheets(data, settings, writeMode, sendResponse) {
     const lastColIdx = colToIndex(lastCol);
     const numCols = lastColIdx - firstColIdx + 1;
 
-    // Build rows
     const rows = data.map(item => {
       const row = new Array(numCols).fill('');
       for (const [col, field] of Object.entries(columnMap)) {
@@ -114,38 +282,24 @@ async function handleSendToSheets(data, settings, writeMode, sendResponse) {
     const actualStartRow = parseInt(startRow) || 2;
 
     if (writeMode === 'append') {
-      // Append after the last row with data
       result = await appendToSheet(spreadsheetId, sheetName, firstCol, lastCol, rows);
     } else {
-      // Overwrite starting from startRow
       const range = `${sheetName}!${firstCol}${actualStartRow}:${lastCol}${actualStartRow + rows.length - 1}`;
       result = await updateSheet(spreadsheetId, range, rows);
     }
 
-    sendResponse({
-      success: true,
-      updatedRows: rows.length,
-      result: result
-    });
-
+    sendResponse({ success: true, updatedRows: rows.length, result });
   } catch (err) {
-    // If token expired, clear it and retry
     if (err.message && err.message.includes('401')) {
       accessToken = null;
       chrome.identity.removeCachedAuthToken({ token: accessToken });
-      sendResponse({
-        success: false,
-        error: 'Токен истёк. Нажмите "Авторизоваться" и попробуйте снова.'
-      });
+      sendResponse({ success: false, error: 'Токен истёк. Нажмите "Авторизоваться" и попробуйте снова.' });
     } else {
       sendResponse({ success: false, error: err.message });
     }
   }
 }
 
-/**
- * Append rows to the end of the sheet
- */
 async function appendToSheet(spreadsheetId, sheetName, firstCol, lastCol, rows) {
   const range = `${sheetName}!${firstCol}:${lastCol}`;
   const url = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent(range)}:append?valueInputOption=USER_ENTERED&insertDataOption=INSERT_ROWS`;
@@ -156,69 +310,52 @@ async function appendToSheet(spreadsheetId, sheetName, firstCol, lastCol, rows) 
       'Authorization': `Bearer ${accessToken}`,
       'Content-Type': 'application/json',
     },
-    body: JSON.stringify({
-      values: rows,
-    }),
+    body: JSON.stringify({ values: rows }),
   });
 
   if (!response.ok) {
     const errorData = await response.json().catch(() => ({}));
-    throw new Error(
-      `Google Sheets API ошибка (${response.status}): ${errorData.error?.message || response.statusText}`
-    );
+    throw new Error(`Google Sheets API ошибка (${response.status}): ${errorData.error?.message || response.statusText}`);
   }
 
   return await response.json();
 }
 
-/**
- * Collect stats from a single TikTok account by opening a background tab,
- * waiting for the page to load, injecting the content script, and extracting data.
- */
 async function handleCollectFromAccount(account, sendResponse) {
   let tabId = null;
   try {
-    // Create a tab in the background
     const tab = await chrome.tabs.create({ url: account.url, active: false });
     tabId = tab.id;
 
-    // Wait for the tab to finish loading
     await waitForTabLoad(tabId);
-
-    // Give the page extra time for dynamic content to render
     await sleep(4000);
 
-    // Inject the content script into the tab
     await chrome.scripting.executeScript({
-      target: { tabId: tabId },
+      target: { tabId },
       files: ['content/content.js'],
     });
 
-    // Small delay for content script to initialize
     await sleep(500);
 
-    // Send extract message to the content script
     const response = await chrome.tabs.sendMessage(tabId, { action: 'extract_stats' });
 
-    // Close the background tab
     await chrome.tabs.remove(tabId);
     tabId = null;
 
     if (response && response.success && response.data) {
-      // Override account name with the configured name
       const data = response.data.map(row => ({
         ...row,
         account: row.account || account.name,
       }));
+
+      // Also send to local server if available
+      sendToServer(data).catch(() => { /* ignore server errors */ });
+
       sendResponse({ success: true, data });
     } else {
-      sendResponse({
-        success: false,
-        error: response?.error || 'Не удалось собрать данные с аккаунта',
-      });
+      sendResponse({ success: false, error: response?.error || 'Не удалось собрать данные с аккаунта' });
     }
   } catch (err) {
-    // Clean up tab if it was opened
     if (tabId) {
       try { await chrome.tabs.remove(tabId); } catch (_) { /* ignore */ }
     }
@@ -226,9 +363,6 @@ async function handleCollectFromAccount(account, sendResponse) {
   }
 }
 
-/**
- * Wait for a tab to finish loading
- */
 function waitForTabLoad(tabId) {
   return new Promise((resolve, reject) => {
     const timeout = setTimeout(() => {
@@ -252,9 +386,6 @@ function sleep(ms) {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
 
-/**
- * Update (overwrite) a specific range
- */
 async function updateSheet(spreadsheetId, range, rows) {
   const url = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent(range)}?valueInputOption=USER_ENTERED`;
 
@@ -264,16 +395,12 @@ async function updateSheet(spreadsheetId, range, rows) {
       'Authorization': `Bearer ${accessToken}`,
       'Content-Type': 'application/json',
     },
-    body: JSON.stringify({
-      values: rows,
-    }),
+    body: JSON.stringify({ values: rows }),
   });
 
   if (!response.ok) {
     const errorData = await response.json().catch(() => ({}));
-    throw new Error(
-      `Google Sheets API ошибка (${response.status}): ${errorData.error?.message || response.statusText}`
-    );
+    throw new Error(`Google Sheets API ошибка (${response.status}): ${errorData.error?.message || response.statusText}`);
   }
 
   return await response.json();

@@ -1,12 +1,13 @@
 /**
  * Content script for TikTok Ads Manager (ads.tiktok.com)
- * Extracts campaign statistics from the dashboard table
+ * Extracts campaign statistics from the dashboard table.
+ * Auto-reports data to background script for server aggregation.
  */
 
 (function () {
   'use strict';
 
-  // Listen for messages from popup
+  // Listen for messages from popup/background
   chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     if (request.action === 'extract_stats') {
       try {
@@ -16,44 +17,80 @@
         sendResponse({ success: false, error: err.message });
       }
     }
-    return true; // Keep message channel open for async response
+    return true;
   });
 
-  /**
-   * Extract data from TikTok Ads Manager table.
-   * TikTok Ads Manager uses a complex table structure.
-   * We look for the main data table and parse each row.
-   */
+  // --- Auto-report: extract data after page loads and send to background ---
+  let autoReportDone = false;
+
+  function tryAutoReport() {
+    if (autoReportDone) return;
+
+    try {
+      const data = extractTableData();
+      if (data && data.length > 0) {
+        autoReportDone = true;
+        const accountName = detectAccountName();
+        chrome.runtime.sendMessage({
+          action: 'auto_report_stats',
+          data: data,
+          accountName: accountName,
+        });
+        showNotification(`Собрано ${data.length} кампаний`, 'success');
+      }
+    } catch (err) {
+      // Silently fail, will retry
+    }
+  }
+
+  // Try auto-report after page loads (with delays for dynamic content)
+  if (document.readyState === 'complete') {
+    setTimeout(tryAutoReport, 3000);
+    setTimeout(tryAutoReport, 8000);
+  } else {
+    window.addEventListener('load', () => {
+      setTimeout(tryAutoReport, 3000);
+      setTimeout(tryAutoReport, 8000);
+    });
+  }
+
+  // Also try when URL changes (SPA navigation)
+  let lastUrl = location.href;
+  const urlObserver = new MutationObserver(() => {
+    if (location.href !== lastUrl) {
+      lastUrl = location.href;
+      autoReportDone = false;
+      setTimeout(tryAutoReport, 4000);
+    }
+  });
+  urlObserver.observe(document.body, { childList: true, subtree: true });
+
+  // --- Data extraction functions ---
+
   function extractTableData() {
-    const results = [];
-
-    // Try to detect the current account name from the page header
     const accountName = detectAccountName();
-
-    // Get today's date for the date column
     const today = new Date().toLocaleDateString('ru-RU');
 
-    // Strategy 1: Look for the main campaign table (standard table structure)
+    // Strategy 1: Standard table
     const tableData = extractFromStandardTable(accountName, today);
     if (tableData.length > 0) return tableData;
 
-    // Strategy 2: Look for data in the new TikTok Ads Manager UI (arco-design based)
+    // Strategy 2: Arco Design table
     const arcoData = extractFromArcoTable(accountName, today);
     if (arcoData.length > 0) return arcoData;
 
-    // Strategy 3: Generic table extraction as fallback
+    // Strategy 3: Generic table
     const genericData = extractFromGenericTable(accountName, today);
     if (genericData.length > 0) return genericData;
 
-    // Strategy 4: Try to extract from any visible table-like structure
+    // Strategy 4: Flex/Grid table
     const flexData = extractFromFlexTable(accountName, today);
     if (flexData.length > 0) return flexData;
 
-    return results;
+    return [];
   }
 
   function detectAccountName() {
-    // Try various selectors for account name
     const selectors = [
       '.advertiser-name',
       '[class*="advertiser"] [class*="name"]',
@@ -70,16 +107,12 @@
       }
     }
 
-    // Try to get from the page title or breadcrumb
     const breadcrumb = document.querySelector('[class*="breadcrumb"]');
     if (breadcrumb) return breadcrumb.textContent.trim().split('/').pop().trim();
 
     return 'Unknown Account';
   }
 
-  /**
-   * Strategy 1: Standard HTML table
-   */
   function extractFromStandardTable(accountName, today) {
     const results = [];
     const tables = document.querySelectorAll('table');
@@ -105,13 +138,8 @@
     return results;
   }
 
-  /**
-   * Strategy 2: Arco Design table (used in newer TikTok Ads Manager)
-   */
   function extractFromArcoTable(accountName, today) {
     const results = [];
-
-    // Arco tables use .arco-table or similar class names
     const arcoTables = document.querySelectorAll(
       '[class*="arco-table"], [class*="byted-table"], [class*="semi-table"]'
     );
@@ -146,13 +174,8 @@
     return results;
   }
 
-  /**
-   * Strategy 3: Generic table extraction
-   */
   function extractFromGenericTable(accountName, today) {
     const results = [];
-
-    // Look for common TikTok Ads Manager table wrapper selectors
     const wrappers = document.querySelectorAll(
       '[class*="campaign-table"], [class*="data-table"], [class*="report-table"], ' +
       '[class*="CampaignTable"], [class*="DataTable"], [class*="TableWrapper"]'
@@ -161,7 +184,6 @@
     for (const wrapper of wrappers) {
       const rows = wrapper.querySelectorAll('[class*="row"], tr');
 
-      // Find header row
       let headerRow = null;
       for (const row of rows) {
         const text = row.textContent.toLowerCase();
@@ -177,7 +199,6 @@
       const headers = Array.from(headerCells).map(h => h.textContent.trim().toLowerCase());
       const headerMap = mapHeaders(headers);
 
-      // Get data rows (all rows after header)
       let foundHeader = false;
       for (const row of rows) {
         if (row === headerRow) {
@@ -199,20 +220,14 @@
     return results;
   }
 
-  /**
-   * Strategy 4: Flex/Grid layout table (div-based)
-   */
   function extractFromFlexTable(accountName, today) {
     const results = [];
-
-    // Sometimes TikTok uses div-based tables with flex/grid layout
     const possibleHeaders = document.querySelectorAll('[class*="header"]');
 
     for (const header of possibleHeaders) {
       const text = header.textContent.toLowerCase();
       if (!isHeaderRow(text)) continue;
 
-      // Found a header-like element, look for sibling rows
       const parent = header.parentElement;
       if (!parent) continue;
 
@@ -224,9 +239,9 @@
       if (!hasRelevantHeaders(headers)) continue;
 
       const headerMap = mapHeaders(headers);
-
       const siblings = parent.children;
       let foundHeader = false;
+
       for (const sibling of siblings) {
         if (sibling === header) {
           foundHeader = true;
@@ -250,7 +265,7 @@
     return results;
   }
 
-  // Helper functions
+  // --- Helper functions ---
 
   function getTableHeaders(table) {
     const headerRow = table.querySelector('thead tr') || table.querySelector('tr:first-child');
@@ -297,23 +312,19 @@
     headers.forEach((header, idx) => {
       const h = header.toLowerCase();
 
-      // Campaign name
       if (h.includes('campaign') || h.includes('кампани') || h.includes('ad group') || h.includes('группа')) {
         if (map.campaign === -1) map.campaign = idx;
       }
 
-      // Spend / Cost
       if (h.includes('cost') || h.includes('spend') || h.includes('расход') || h.includes('затрат') ||
           (h.includes('total') && h.includes('cost'))) {
         if (map.spend === -1) map.spend = idx;
       }
 
-      // CPC
       if (h === 'cpc' || h.includes('cost per click') || h.includes('цена за клик')) {
         map.cpc = idx;
       }
 
-      // CPL / CPA / Cost per result
       if (h === 'cpl' || h === 'cpa' || h.includes('cost per result') ||
           h.includes('cost per lead') || h.includes('цена за результат') ||
           h.includes('цена за лид') || h.includes('cost per conversion')) {
@@ -339,7 +350,6 @@
     if (headerMap.campaign >= 0 && headerMap.campaign < cellTexts.length) {
       data.campaign = cellTexts[headerMap.campaign];
     } else if (cellTexts.length > 0) {
-      // First text column is usually the campaign name
       data.campaign = cellTexts[0];
     }
 
@@ -360,7 +370,6 @@
 
   function cleanNumber(text) {
     if (!text || text === '-' || text === '--' || text === 'N/A') return '';
-    // Remove currency symbols and whitespace, normalize decimal separator
     return text
       .replace(/[$€£¥₽руб\.RUB\s]/gi, '')
       .replace(/,/g, '.')
@@ -368,8 +377,21 @@
   }
 
   function isValidRow(row) {
-    // A row is valid if it has at least a campaign name and one metric
     return row.campaign && row.campaign.length > 0 &&
       (row.spend || row.cpc || row.cpl);
+  }
+
+  // --- Notification on TikTok Ads page ---
+  function showNotification(message, type) {
+    const existing = document.getElementById('ttstats-notification');
+    if (existing) existing.remove();
+
+    const div = document.createElement('div');
+    div.id = 'ttstats-notification';
+    div.className = `ttstats-notify ttstats-notify-${type}`;
+    div.textContent = `TikTok Stats: ${message}`;
+    document.body.appendChild(div);
+
+    setTimeout(() => div.remove(), 4000);
   }
 })();
